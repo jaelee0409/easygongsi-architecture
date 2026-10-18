@@ -1,21 +1,21 @@
 # EasyGongsi (쉬운공시): architecture write-up
 
-[EasyGongsi](https://www.easygongsi.com) turns filings on DART, Korea's electronic corporate disclosure system, into plain-language summaries, key numbers, and alerts for Korean retail investors. It is a personal project, planned, built, and operated by one person, Jae Seong Lee, with Claude Code (see [How it was built](#how-it-was-built)). Live since October 2026.
+[EasyGongsi](https://www.easygongsi.com) turns filings on DART, Korea's electronic corporate disclosure system, into plain-language summaries, extracted figures, and alerts for Korean retail investors. It is a personal project that I planned, built, and run alone, with Claude Code (see [How it was built](#how-it-was-built)). It has been live since October 2026.
 
-The application code is in a private repository. This repo describes the system: how filings come in, how scoring, alerts, and billing work, the bugs that shaped it, the decisions and their trade-offs, and the limitations that are still open. Short code excerpts are copied from the private repo, trimmed, with their comments translated from Korean.
+The application code is in a private repository, and this repo is the write-up. Code excerpts are copied from the private repo and trimmed, with their comments translated from Korean.
 
 ## What it does
 
-- **Coverage:** about 1.19M disclosures filed since 2014; 2,652 companies listed on KOSPI and KOSDAQ, Korea's stock markets.
-- **Per filing:** classified by type; key numbers extracted (earnings, dividends, financing, ownership stakes); an AI summary (Claude) for subscribers; an importance score from 1 to 10.
-- **Alerts:** filings scoring 8 or higher are posted automatically to a public Telegram channel and sent to subscribers. The Telegram bot @EasyGongsiBot also sends watchlist alerts.
-- **Watchlist:** up to 20 stocks, with 1 free after login.
-- **Subscription:** monthly, billed through Toss Payments, a Korean payment gateway. Launch price ₩14,900 a month, kept fixed for early subscribers. A mid-term cancellation is refunded minus a 10% penalty.
-- **Other pages:** National Pension Service holdings (1,206 stocks from the year-end list, plus recent changes from large-shareholding reports); macro indicators from ECOS (Bank of Korea), FRED, EIA, KOSIS (Statistics Korea), and the Korea Customs Service; KRX (Korea Exchange) daily prices since 2015.
-- **SEO:** a sitemap of about 10,000 URLs; page titles built from key numbers.
-- **Not a product feature:** an admin-only 3D "research office" built with React Three Fiber. Its Kiwoom quotes (Kiwoom is a Korean brokerage) run only on the local machine.
+- It covers about 1.19M disclosures filed since 2014 and the 2,652 companies listed on KOSPI and KOSDAQ, Korea's stock markets.
+- Each filing is classified by type, has its figures extracted (earnings, dividends, financing, ownership stakes), and gets an importance score from 1 to 10. Subscribers also get an AI summary (Claude).
+- Filings scoring 8 or higher are posted automatically to a public Telegram channel and sent to subscribers. The Telegram bot @EasyGongsiBot also sends watchlist alerts.
+- A watchlist holds up to 20 stocks, with 1 free after login.
+- The subscription is monthly, billed through Toss Payments, a Korean payment gateway. The launch price of ₩14,900 a month stays fixed for early subscribers, and a mid-term cancellation is refunded minus a 10% penalty.
+- Other pages cover National Pension Service holdings (1,206 stocks from the year-end list, plus recent changes from large-shareholding reports), macro indicators from ECOS (Bank of Korea), FRED, EIA, KOSIS (Statistics Korea), and the Korea Customs Service, and KRX (Korea Exchange) daily prices since 2015.
+- A sitemap lists about 10,000 URLs, and page titles are built from the extracted figures.
+- There is also an admin-only 3D "research office" built with React Three Fiber. Its Kiwoom quotes (Kiwoom is a Korean brokerage) run only on the local machine.
 
-**History.** EasyGongsi started as [Jubabi](https://github.com/jaelee0409/jubabi), an Android app for real-time DART alerts (Aug 2025 – Sep 2026, stopped). In September 2026 the project moved to the web to avoid app-store review and in-app payment overhead. First commit 2026-09-26; renamed EasyGongsi and moved to www.easygongsi.com on 2026-10-01.
+EasyGongsi started as [Jubabi](https://github.com/jaelee0409/jubabi), an Android app for real-time DART alerts (Aug 2025 – Sep 2026, stopped). In September 2026 the project moved to the web to avoid app-store review and in-app payment overhead. The first commit was on 2026-09-26, and on 2026-10-01 the project was renamed EasyGongsi and moved to www.easygongsi.com.
 
 ## Architecture
 
@@ -43,20 +43,20 @@ flowchart LR
   WEB -- "first charge" --> TOSS
 ```
 
-Two processes share one database:
+Two processes share one database.
 
-- **Web app (Vercel).** Next.js 16 with React 19 and Tailwind CSS 4. Handles Kakao, Google, and Naver login itself (Kakao and Naver are Korean platforms; see [Login without Supabase Auth](#login-without-supabase-auth)). Starts subscriptions and takes the first charge.
-- **Worker (AWS EC2 t3.micro).** One Node 22 process, bundled into a single file with esbuild and run by systemd. Collects DART data, runs scheduled jobs (hourly billing renewals, daily jobs), and sends alerts.
-- **PostgreSQL (Supabase).** Both processes connect through Supabase's transaction pooler with the postgres.js driver and Drizzle ORM. Each process opens at most 3 connections and closes idle ones after 20 seconds, because Supabase accepts only 15 connections in total across the worker, scripts, local development, and Vercel. postgres.js's default of 10 per process, kept open forever, filled that limit, and pages that run many queries at once failed with "max clients reached".
+- The web app runs on Vercel: Next.js 16 with React 19 and Tailwind CSS 4. It handles Kakao, Google, and Naver login itself (Kakao and Naver are Korean platforms; see [Login without Supabase Auth](#login-without-supabase-auth)), starts subscriptions, and takes the first charge.
+- The worker is one Node 22 process on an AWS EC2 t3.micro, bundled into a single file with esbuild and run by systemd. It collects DART data, runs scheduled jobs (hourly billing renewals, daily jobs), and sends alerts.
+- Both connect to PostgreSQL on Supabase through Supabase's transaction pooler, with the postgres.js driver and Drizzle ORM. Each process opens at most 3 connections and closes idle ones after 20 seconds, because Supabase accepts only 15 connections in total across the worker, scripts, local development, and Vercel. postgres.js's default of 10 per process, kept open forever, filled that limit, and pages that ran many queries at once failed with "max clients reached".
 
 ### Login without Supabase Auth
 
 Supabase Auth was removed on 2026-09-28. Its Kakao provider always requested the email scope (`account_email`), which Kakao rejects with error KOE205 unless the app is registered as a Kakao Biz App. Kakao OAuth is now handled directly:
 
 - It asks only for the nickname and profile image.
-- When login starts, a random state (`randomUUID`) and the return path go into a 10-minute cookie; the callback rejects a mismatched state. Kakao and Naver share this.
+- When login starts, a random state (`randomUUID`) and the return path go into a 10-minute cookie, and the callback rejects a mismatched state. Naver login works the same way.
 - Users are keyed by Kakao member number.
-- The login is a cookie signed with `AUTH_SECRET` (30 days, httpOnly, SameSite=Lax).
+- The login itself is a cookie signed with `AUTH_SECRET` (30 days, httpOnly, SameSite=Lax).
 
 ```ts
 // src/app/auth/actions.ts: before redirecting to Kakao or Naver, keep a random state in a 10-minute cookie
@@ -85,7 +85,7 @@ if (!code || !saved.state || url.searchParams.get("state") !== saved.state) retu
 | DART Open API, ownership filings | every 60 s; every 5 min in the quiet hours (06:00–07:00 and 20:00–24:00 KST, as for RSS) | ownership filings are not in the RSS feed |
 | DART Open API, list call | every 10 min | fills in anything RSS missed |
 
-**Dedup in the database.** New filings are saved with `INSERT … ON CONFLICT DO NOTHING RETURNING`. Only the rows the statement returns, the ones this call actually inserted, go on to follow-up collection and alerts. When the same filing arrives again, from RSS and then the backfill or again after a worker restart, the insert conflicts and returns nothing. Follow-up work and alerts therefore start at most once per filing; [Known limitations](#known-limitations) covers what "at most" costs.
+New filings are saved with `INSERT … ON CONFLICT DO NOTHING RETURNING`, and only the rows the statement returns, the ones this call inserted, go on to follow-up collection and alerts. When the same filing arrives again (from RSS and then the backfill, or after a worker restart), the insert conflicts and returns nothing. Follow-up work and alerts therefore start at most once per filing; [Known limitations](#known-limitations) covers what "at most" costs.
 
 ```ts
 // src/server/services/realtime.ts (trimmed): RSS ingestion. rcept_no, DART's receipt number, is the primary key
@@ -98,20 +98,17 @@ const inserted = await db
 onNewDisclosures(inserted, log, "RSS"); // follow-up work and alerts start from these rows only
 ```
 
-**Latency logging.** For each filing, the worker logs the lag from DART's receipt time to the moment it showed up in RSS. When a receipt time has only minute precision, the lag is logged as an upper bound (≤ N s).
+For each filing, the worker logs the lag from DART's receipt time to the moment the filing showed up in RSS. When a receipt time has only minute precision, the lag is logged as an upper bound (≤ N s). DART allows 40,000 calls a day per API key, and the worker counts its outbound calls.
 
-**Quota.** DART allows 40,000 calls a day per API key. The worker counts its outbound calls.
+For preliminary earnings, changes in revenue or profit structure, dividends, supply contracts, and ownership stakes, the Open API may not have the numbers yet when a filing appears. The worker then reads them from the original filing in the DART web viewer, with requests 2.5 s apart, retries at 2, 5, and 10 minutes, and a fallback to the Open API after 1 hour.
 
-**Key numbers before the Open API has them.** For preliminary earnings, changes in revenue or profit structure, dividends, supply contracts, and ownership stakes, the Open API may not have the numbers yet when a filing appears. The worker then reads them from the original filing in the DART web viewer: requests 2.5 s apart, retries at 2, 5, and 10 minutes, and a fallback to the Open API after 1 hour.
+Statements from periodic reports are checked before saving (assets = liabilities + equity, income tax, gross profit) and compared with the Open API's main accounts. Missing revenue was filled in from the full financial statements for 561 reports, for example KRAFTON's 2021 and 2022 reports.
 
-**Checks on financial statements.** Statements from periodic reports are checked before saving (assets = liabilities + equity, income tax, gross profit) and compared with the Open API's key accounts. Missing revenue was filled in from the full financial statements for 561 reports, for example KRAFTON's 2021 and 2022 reports.
+### Bug: a whole stake shown as the change
 
-**Bug: a whole stake shown as the change.**
+I noticed an implausible change in the product itself, +10.14 percentage points for the National Pension Service's stake in NC, and traced it from there. The stake had fallen below 10%, which ended its major-shareholder (주요주주) reporting, and then crossed 10% again (9.76% on Sep 17 → 10.14% on Oct 12). The fresh report listed the previous stake as 0, so the whole stake showed as the change.
 
-- **How it was found:** the author noticed an implausible change in the product itself: +10.14 percentage points for the National Pension Service's stake in NC. The trace started there.
-- **Cause:** the National Pension Service's stake in NC fell below 10%, which ended its major-shareholder (주요주주) reporting, then crossed 10% again (9.76% on Sep 17 → 10.14% on Oct 12). The fresh report listed the previous stake as 0, so the whole stake showed as the change.
-- **Fix:** compute the change against the same filer's previous report on the same form. With no earlier report, the filing is labeled "first report" (처음 보고). The National Pension Service page no longer mixes large-shareholding (대량보유) reports into the comparison, because they count differently (10.24% vs 10.14% at the same time).
-- **Result:** the same change now shows +0.38 percentage points. The fix applies to the disclosure list and to Telegram alerts.
+The change is now computed against the same filer's previous report on the same form, and a filing with no earlier report is labeled "first report" (처음 보고). The National Pension Service page also stopped mixing large-shareholding (대량보유) reports into the comparison, because they count differently (10.24% vs 10.14% at the same time). The same change now shows +0.38 percentage points, in the disclosure list and in Telegram alerts.
 
 ```ts
 // src/server/services/ownership.ts (trimmed)
@@ -142,28 +139,30 @@ function fixFreshChange(r, prev) {
 
 ## Importance scoring and alerts
 
-- Each filing gets a score from 1 to 10: numeric rules plus four questions answered by the TypeSafe Jev API. The scale changed from 1–5 to 1–10 on 2026-10-11.
-- **TypeSafe Jev** is TypeSafe AI's API (`POST api.typesafe.ai/v1/systemone`, model `jev-latest`, which was jev-1.13.0 in October 2026). One call answers several structured questions about a text: graded scores, yes/no probabilities, or choices. The questions are in English; the filing data is in Korean. Only the worker calls it.
-- **The four questions:**
-  - `materiality`: a 10-level scale since rule version 11 (2026-10-11); 5 levels before.
-  - `routine`: is this routine administration?
-  - `existential`: is survival or control at stake (delisting, default, a change of largest shareholder)?
-  - `follow_up`: is this a follow-up to something already announced? (since version 12)
-- The rules are versioned: 12 versions by 2026-10-12. A rescore script recomputes stored scores.
-- Cost: TypeSafe Jev charges $0.042 per 1M input tokens, and a filing takes about 600–800 tokens, so about $0.025–0.034 per 1,000 filings in input tokens.
-- Score 8 or higher: posted automatically to the public Telegram channel and sent to subscribers. Score 6 or higher: listed as a major disclosure (주요 공시) on the site.
-- @EasyGongsiBot sends watchlist alerts, and subscriber alerts with an AI summary.
-- Delivery is at-most-once today. See [Known limitations](#known-limitations).
+Each filing gets a score from 1 to 10 from numeric rules plus four questions answered by the TypeSafe Jev API. The scale changed from 1–5 to 1–10 on 2026-10-11.
+
+TypeSafe Jev is TypeSafe AI's API (`POST api.typesafe.ai/v1/systemone`, model `jev-latest`, which was jev-1.13.0 in October 2026). One call answers several structured questions about a text: graded scores, yes/no probabilities, or choices. The questions are in English and the filing data is in Korean, and only the worker calls it. The four questions:
+
+- `materiality`: a 10-level scale since rule version 11 (2026-10-11); 5 levels before.
+- `routine`: is this routine administration?
+- `existential`: is survival or control at stake (delisting, default, a change of largest shareholder)?
+- `follow_up`: is this a follow-up to something already announced? (since version 12)
+
+The rules are versioned, with 12 versions by 2026-10-12, and a rescore script recomputes stored scores. TypeSafe Jev charges $0.042 per 1M input tokens and a filing takes about 600–800 tokens, which comes to about $0.025–0.034 per 1,000 filings in input tokens.
+
+Filings that score 8 or higher are posted automatically to the public Telegram channel and sent to subscribers; 6 or higher are listed as major disclosures (주요 공시) on the site. @EasyGongsiBot sends watchlist alerts, and subscriber alerts with an AI summary. Delivery is at-most-once today; see [Known limitations](#known-limitations).
 
 ## Billing with Toss Payments
 
-- Monthly auto-billing with a Toss billing key, a stored token for recurring charges. Fixed billing day; the renewal job runs hourly in the worker.
-- Every charge goes through one function, `charge()`: the first charge (`startSubscription`, on Vercel) and every renewal (worker).
-  - On a network error or a temporary Toss error (5xx), it resends once with the same `orderId`. Toss treats the `orderId` as an idempotency key, so it approves that order at most once.
-  - If there is still no answer, it looks the payment up by `orderId`: DONE → use it; not found → `NotChargedError`, safe to retry; the lookup fails too → the outcome is unknown, and the original error is thrown.
-  - Card declines (400/403) fail right away.
-- `orderId` = `${subscriptionId}-${periodStart in base36}-${attempt}`.
-- Payment rows are idempotent on a unique `orderId` (`ON CONFLICT DO NOTHING`).
+Subscriptions renew monthly on a fixed billing day, charged with a Toss billing key (a stored token for recurring charges). The renewal job runs hourly in the worker.
+
+Every charge goes through one function, `charge()`: the first charge (`startSubscription`, on Vercel) and every renewal (worker).
+
+- On a network error or a temporary Toss error (5xx), it resends once with the same `orderId`. Toss treats the `orderId` as an idempotency key, so it approves that order at most once.
+- If there is still no answer, it looks the payment up by `orderId`. DONE means the payment is used; not found raises `NotChargedError`, which is safe to retry; if the lookup fails too, the outcome is unknown and the original error is thrown.
+- Card declines (400/403) fail right away.
+
+The `orderId` is `${subscriptionId}-${periodStart in base36}-${attempt}`, and payment rows are idempotent on it (a unique `orderId` with `ON CONFLICT DO NOTHING`).
 
 ```ts
 // src/server/services/billing.ts (trimmed): every charge, first or renewal, goes through here
@@ -201,15 +200,15 @@ export async function charge(sub, payment): Promise<TossPayment> {
 
 ### Two tabs, one charge
 
-- **Problem:** a user can start a subscription from two tabs at the same moment, and both requests must not charge.
-- **Decision:** one conditional UPDATE claims the checkout:
-  `UPDATE users SET checkout_started_at … WHERE checkout_started_at IS NULL OR <older than the lease> … RETURNING`.
-  The request that gets the row goes on to Toss. The request that gets no row returns "busy" without calling Toss.
-- **Lease: 5 minutes** (`CHECKOUT_CLAIM_MS`). It is sized to outlast the slowest `startSubscription` (the billing-key step takes about 30 s; the first charge, the resend, and the lookup about 2 minutes), so a second request can't charge while the first is still charging. A request that dies mid-checkout stops blocking after 5 minutes.
-- **Release:** in `finally`, and only if the claim is still this request's (`WHERE checkout_started_at = claimedAt`), so a slow request can't wipe a newer claim.
-- **Why one statement:** the check and the claim happen together, so there is no gap between reading and writing for a second request to slip into. It is the same idea as the seat claim in [ticket-lab](https://github.com/jaelee0409/ticket-lab), where the conditional UPDATE was load-tested against pessimistic locking, optimistic locking, and a Redis lock.
-- **Result and verification:** two tabs subscribing at once → one charge. That follows from the single conditional UPDATE; there are no automated tests, and no test covers it yet. A concurrency test for the claim is next, written by hand.
-- **Scope:** this covers concurrent starts only. A user's retry after certain failures can still charge twice; see [Known limitations](#known-limitations).
+A user can start a subscription from two tabs at the same moment, and only one of the two requests may charge. One conditional UPDATE claims the checkout:
+
+`UPDATE users SET checkout_started_at … WHERE checkout_started_at IS NULL OR <older than the lease> … RETURNING`
+
+The request that gets the row goes on to Toss, and the one that gets no row returns "busy" without calling Toss. Because the check and the claim are one statement, a second request finds no gap between a read and a write to slip into. The seat claim in [ticket-lab](https://github.com/jaelee0409/ticket-lab) uses the same idea, and there the conditional UPDATE was load-tested against pessimistic locking, optimistic locking, and a Redis lock.
+
+The claim is a 5-minute lease (`CHECKOUT_CLAIM_MS`), sized to outlast the slowest `startSubscription`: the billing-key step takes about 30 s, and the first charge, the resend, and the lookup about 2 minutes. A second request can't charge while the first is still charging, and a request that dies mid-checkout stops blocking after 5 minutes. The claim is released in `finally`, and only if it is still this request's (`WHERE checkout_started_at = claimedAt`), so a slow request can't wipe a newer claim.
+
+The one-charge result follows from the single conditional UPDATE; no test covers it yet, because the project has no automated tests. A concurrency test for the claim is next, written by hand. The claim covers concurrent starts only, and a user's retry after certain failures can still charge twice (see [Known limitations](#known-limitations)).
 
 ```ts
 // src/server/services/billing.ts (trimmed)
@@ -246,24 +245,12 @@ try {
 
 ## AI cost control
 
-**Caps on cost, not on count.** Summaries are for subscribers only, and the limit is money:
+Summaries are for subscribers only, and their caps are in dollars:
 
 - $0.30 per subscriber per 24 hours, shown in the UI as about 15 short summaries (a long filing counts as several).
 - $5 per 24 hours across all subscribers. At that point summaries pause and the operator is alerted; admins can still generate. The total cap also guards against multi-account abuse or a bug that regenerates summaries in a loop.
-- Why cost and not a count: a short filing costs about $0.02 to summarize and a long one about $0.30 (a long annual report, 사업보고서, first 150k characters; a comparison on 2026-09-30). A long filing costs as much as about 15 short ones, so a count says little about cost.
-- A summary is generated once and shared by all subscribers; opening an existing summary isn't counted.
-- The cost of each call is computed from that model's price.
 
-**The output check (`summary-check.ts`).** Subscribers see summaries with no human review, so a check runs before a summary is saved. It blocks two things: wrong large numbers and investment-advice wording.
-
-- **Number rule:** only numbers ≥ 10,000 are checked (amounts, share counts); dates and small ratios are skipped to avoid false alarms. A number passes if it appears in the filing, differs only by a unit the filing's table declares (for example "(단위: 백만원)", in millions of won), or is the sum or difference of two numbers in the filing (599,627 − 458,689 = 140,938). Amounts written with 억 (10⁸ won) or 조 (10¹² won) pass within ±10% of a filing amount, which catches order-of-magnitude errors such as "1조 원대" (the ₩1 trillion range) for 10억 (₩1 billion). Only declared units are multiplied, because trying every unit lets a 1,000x error match by chance.
-- **Advice filter:** regexes for buy or sell opinions (매수·매도 의견), "buy it" or "sell it" (사세요/파세요), target prices (목표주가), under- or overvalued (저평가·고평가), price forecasts, stock picks (종목 추천), and "promising" (유망). They are tuned so filing language such as 장내매수 (on-market purchase), 공개매수 (tender offer), and 매각 검토 (a sale under review) passes.
-- **On a number mismatch:** the summary is regenerated once with the problems appended to the prompt; if it is still wrong, it is hidden.
-- **What it can't catch,** per its own comment: a meaning explained backwards, and small number or date errors.
-
-**Model choice.** In a 10-filing comparison on 2026-09-30, Haiku 4.5 got amount units wrong (10억, ₩1 billion, came out as "1조", ₩1 trillion) and misread terms, so summaries stayed on Sonnet 5.5. Disclosure summaries moved to Claude Haiku 5.5 (effort xhigh) on 2026-10-08; company introductions stay on Claude Sonnet 5.5.
-
-Importance questions run on TypeSafe Jev (cost under [Importance scoring and alerts](#importance-scoring-and-alerts)).
+A count would say little about cost. A short filing costs about $0.02 to summarize and a long one about $0.30 (a long annual report, 사업보고서, first 150k characters; compared on 2026-09-30), so one long filing costs as much as about 15 short ones. A summary is generated once and shared by all subscribers, so opening an existing summary isn't counted. The cost of each call is computed from that model's price.
 
 ```ts
 // src/server/services/summaries.ts (trimmed)
@@ -281,6 +268,16 @@ export async function summaryBudgetBlock(userId: string): Promise<"daily" | "pau
   return "paused";
 }
 ```
+
+### Output check (`summary-check.ts`)
+
+Subscribers see summaries with no human review, so a check runs before a summary is saved. It blocks wrong large numbers and investment-advice wording.
+
+- Only numbers ≥ 10,000 are checked (amounts, share counts); dates and small ratios are skipped to avoid false alarms. A number passes if it appears in the filing, differs only by a unit the filing's table declares (for example "(단위: 백만원)", in millions of won), or is the sum or difference of two numbers in the filing (599,627 − 458,689 = 140,938). Amounts written with 억 (10⁸ won) or 조 (10¹² won) pass within ±10% of a filing amount, which catches order-of-magnitude errors such as "1조 원대" (the ₩1 trillion range) for 10억 (₩1 billion). Only declared units are multiplied, because trying every unit lets a 1,000x error match by chance.
+- The advice filter uses regexes for buy or sell opinions (매수·매도 의견), "buy it" or "sell it" (사세요/파세요), target prices (목표주가), under- or overvalued (저평가·고평가), price forecasts, stock picks (종목 추천), and "promising" (유망). They are tuned so filing language such as 장내매수 (on-market purchase), 공개매수 (tender offer), and 매각 검토 (a sale under review) passes.
+- On a number mismatch, the summary is regenerated once with the problems appended to the prompt. If it is still wrong, it is hidden.
+- Per the code's own comment, the check can't catch a meaning explained backwards, or small number and date errors.
+
 ```ts
 // src/server/ai/summary-check.ts (trimmed): every number of 10,000 or more in a summary must come from the filing
 const derivable = (n: number) => {
@@ -298,20 +295,24 @@ const derivable = (n: number) => {
 if (!sourceWon.some((s) => s > 0 && Math.abs(s - won) / s <= 0.1)) issues.push(`amount differs in size from the filing: "${m[0]}"`);
 ```
 
+In a 10-filing comparison on 2026-09-30, Haiku 4.5 got amount units wrong (10억, ₩1 billion, came out as "1조", ₩1 trillion) and misread terms, so summaries stayed on Sonnet 5.5. Disclosure summaries moved to Claude Haiku 5.5 (effort xhigh) on 2026-10-08; company introductions stay on Claude Sonnet 5.5. Importance questions run on TypeSafe Jev (cost under [Importance scoring and alerts](#importance-scoring-and-alerts)).
+
 ## Operations
 
 ### Worker memory on a t3.micro
 
-- **Incident (2026-10-12):** the worker exhausted memory on the 1 GiB t3.micro. The server froze for 18 minutes, with SSH barely working, until the kernel killed the worker; out-of-memory deaths repeated from 20:05 that day.
-- **Cause:** the screener computation read every company's data at once: about 160k financial rows, plus dividends, largest holders, share counts, and EV/EBITDA inputs, nearly 600 MB for that computation alone. The measured peak before any batching was about 570 MB.
-- **Steps measured:** 300 companies per batch → about 350 MB. The current code reads 100 per batch and also reads dividend and largest-shareholder data in batches → about 290 MB, heap 90 MB. The step from 350 to 290 MB is not from batch size alone.
-- **Decision:** 100 companies per batch, with the dividend and largest-shareholder reads batched too.
-- **Guards, from first to last:**
-  - `--max-old-space-size=384`. With a loose heap limit, V8 collected late and the screener reached 450–580 MB.
-  - A watchdog that alerts the operator and exits at 450 MB RSS.
-  - systemd `MemoryHigh=500M` (reclaim and slow down), `MemoryMax=600M` (kill only the worker), and `MemorySwapMax=0` (the worker never swaps; the 1 GB swap is for the rest of the system).
-  - `Restart=always`, `RestartSec=10`, `OOMScoreAdjust=500` (the kernel picks the worker before SSH), and `TimeoutStopSec=15`.
-- **Restart safety:** daily jobs are recorded in `.worker-done.json`, so a restart doesn't run them twice. A job that died midway is reported when the worker starts again.
+On 2026-10-12 the worker exhausted memory on the 1 GiB t3.micro. The server froze for 18 minutes, with SSH barely working, until the kernel killed the worker, and out-of-memory deaths repeated from 20:05 that day.
+
+The screener computation read every company's data at once: about 160k financial rows, plus dividends, largest holders, share counts, and EV/EBITDA inputs, nearly 600 MB for that computation alone. The measured peak before any batching was about 570 MB. Reading 300 companies per batch brought it to about 350 MB. The current code reads 100 per batch and also batches the dividend and largest-shareholder reads, for a peak of about 290 MB (heap 90 MB). The step from 350 to 290 MB comes from both changes together, the smaller batch and the batched reads.
+
+The guards, from first to last:
+
+- `--max-old-space-size=384`. With a loose heap limit, V8 collected late and the screener reached 450–580 MB.
+- A watchdog that alerts the operator and exits at 450 MB RSS.
+- systemd `MemoryHigh=500M` (reclaim and slow down), `MemoryMax=600M` (kill only the worker), and `MemorySwapMax=0` (the worker never swaps; the 1 GB swap is for the rest of the system).
+- `Restart=always`, `RestartSec=10`, `OOMScoreAdjust=500` (the kernel picks the worker before SSH), and `TimeoutStopSec=15`.
+
+Daily jobs are recorded in `.worker-done.json`, so a restart doesn't run them twice, and a job that died midway is reported when the worker starts again.
 
 ```ts
 // src/server/services/screener.ts (trimmed). CHUNK = 100.
@@ -354,17 +355,11 @@ setInterval(() => {
 
 ### A freeze, then transactions that always failed (postgres.js)
 
-**First problem: every page froze (2026-09-29).**
+On 2026-09-29 every page froze. With postgres.js's default pipelining, when more queries arrived than there were connections, postgres.js queued several on one connection. Through Supabase's transaction pooler that stalled, the stalled queries held every connection, and every page froze. Setting `max_pipeline: 0` (one query per connection at a time) ended the freeze.
 
-- **Cause:** with postgres.js's default pipelining, when more queries arrived than there were connections, postgres.js queued several on one connection. Through Supabase's transaction pooler that stalled; the stalled queries held every connection, and every page froze.
-- **Fix:** `max_pipeline: 0`, one query per connection at a time.
+It also made every transaction fail with `UNSAFE_TRANSACTION`, which broke subscription start and renewal and the ownership, bond, and screener syncs. `sql.begin` only takes a connection that can accept more work, and with pipelining off, none ever can. The fix, the same day, kept `max_pipeline: 0` and added a `transaction()` helper that reserves one connection and runs BEGIN, COMMIT, and ROLLBACK on it.
 
-**Second problem, a side effect: every transaction failed with `UNSAFE_TRANSACTION`** (subscription start and renewal, and the ownership, bond, and screener syncs).
-
-- **Cause:** `sql.begin` only takes a connection that can accept more work, and with pipelining off, none ever can.
-- **Fix (same day):** kept `max_pipeline: 0` and added a `transaction()` helper that reserves one connection and runs BEGIN, COMMIT, and ROLLBACK on it.
-- **Rule:** inside `transaction()`, only the `tx` argument may be used. Touching the outer `db` would wait for a second connection and can deadlock under load.
-- **Checked by hand:** commit, rollback, and 8 transactions plus 8 plain queries at once on 3 connections, which is the load that would expose that deadlock.
+Inside `transaction()`, only the `tx` argument may be used, because touching the outer `db` would wait for a second connection and can deadlock under load. Commit and rollback were checked by hand, along with 8 transactions plus 8 plain queries at once on 3 connections, the load that would expose that deadlock.
 
 ```ts
 // src/server/db/index.ts
@@ -397,16 +392,15 @@ export async function transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
 
 ### Health checks and operator tools
 
-- An alert fires when a loop hasn't succeeded for a set time: RSS 5 minutes, ownership 15 minutes.
+- An alert fires when a loop hasn't succeeded for a set time: 5 minutes for RSS, 15 minutes for ownership filings.
 - A healthchecks.io ping.
 - Telegram operator commands (`/status`, `/today`, `/errors`, `/logs`) and a summary every weekday evening.
 
 ### Vercel cost
 
-- Only the UI strings a page needs are sent to the browser: about 65 KB less per page.
-- Screener metrics and market cap are cached for 30 minutes to cut database egress.
+Only the UI strings a page needs are sent to the browser, about 65 KB less per page. Screener metrics and market cap are cached for 30 minutes to cut database egress.
 
-## Key decisions and trade-offs
+## Decisions and trade-offs
 
 | Decision | What it buys | What it costs |
 |---|---|---|
@@ -417,18 +411,18 @@ export async function transaction<T>(fn: (tx: Tx) => Promise<T>): Promise<T> {
 | Every charge through `charge()`: same-`orderId` resend, then lookup | Inside one request, a lost answer is resent with the same `orderId` and then looked up | A new request gets a new `orderId`, which is the open gap in [Known limitations](#known-limitations) |
 | `max_pipeline: 0` | Ended the freeze through the transaction pooler | `sql.begin` stopped working: a `transaction()` helper replaced it, and only `tx` may be used inside |
 | Kakao OAuth handled directly instead of Supabase Auth | Login without the email scope (only nickname and profile image) | The state cookie and the signed login cookie are now this code's job |
-| Key numbers read from the original filing when the Open API lags | Numbers before the Open API has them | More requests and moving parts: 2.5 s spacing, retries at 2, 5, and 10 minutes, a fallback after 1 hour |
-| Summary limits set on cost, not count | A long filing (about 15 short ones' cost) can't blow the budget | The UI can only estimate a count (about 15 short summaries; a long filing counts as several) |
+| Figures read from the original filing when the Open API lags | The numbers arrive before the Open API has them | More requests and moving parts: 2.5 s spacing, retries at 2, 5, and 10 minutes, a fallback after 1 hour |
+| Summary caps in dollars | A long filing (about 15 short ones' cost) can't blow the budget | The UI can only estimate a count (about 15 short summaries; a long filing counts as several) |
 | An automatic check before a summary is saved | Wrong large numbers and investment-advice wording aren't shown | Small number or date errors and reversed meanings can still get through; a number mismatch costs one regeneration, and a summary still wrong is hidden |
 | Importance as versioned rules plus Jev questions, with a rescore script | Rules can change and stored scores can be recomputed (12 versions so far) | Jev input tokens for every filing (about 600–800) |
 
 ## Known limitations
 
-Both were found in a code review on 2026-10-13 and are open as of 2026-10-17. Their fixes are next.
+Both were found in a code review on 2026-10-13 and were still open on 2026-10-17. I'll write both fixes by hand next.
 
 ### 1. Alert delivery is at-most-once
 
-**What happens now.** `onNewDisclosures` fires `void alertNewDisclosures(rows)` without waiting for it, and no delivery record is kept in the database. Follow-up and scoring tasks sit in an in-memory queue (`const queue = new Map`). If the worker dies after the INSERT commits, those alerts are never sent: on restart, the INSERT conflicts and returns no row. Telegram errors other than 403 are logged and dropped with no retry. A 403 means the user blocked the bot, and alerts are turned off for that user, which is correct.
+`onNewDisclosures` fires `void alertNewDisclosures(rows)` without waiting for it, and no delivery record is kept in the database. Follow-up and scoring tasks sit in an in-memory queue (`const queue = new Map`). If the worker dies after the INSERT commits, those alerts are never sent: on restart, the INSERT conflicts and returns no row. Telegram errors other than 403 are logged and dropped with no retry. A 403 means the user blocked the bot, and turning off that user's alerts is the intended behavior.
 
 ```ts
 // src/server/services/realtime.ts (trimmed): what happens right after the INSERT
@@ -445,24 +439,22 @@ function onNewDisclosures(rows, log, source) {
 // on restart the INSERT conflicts and returns no rows. That is the at-most-once limitation.
 ```
 
-**Planned fix.**
+Planned fix:
 
-- An outbox table with a unique `(rcept_no, chat_id)`: one row per filing and recipient (`rcept_no` is DART's receipt number), so delivery state lives in the database instead of memory.
+- An outbox table with a unique `(rcept_no, chat_id)`, one row per filing and recipient (`rcept_no` is DART's receipt number), so delivery state lives in the database instead of memory.
 - A sender loop that retries with backoff.
 - An alert when pending rows go stale.
 
 ### 2. A user's retry can charge twice
 
-**What is handled.** Within one request, a lost Toss answer is handled: `charge()` resends with the same `orderId`, then looks the payment up.
+Within one request, a lost Toss answer is handled: `charge()` resends with the same `orderId`, then looks the payment up. Across requests, a double charge is possible in two cases:
 
-**What is not.** A double charge is possible across requests, in two cases:
+- (a) Toss approved, but its answer and the lookup both failed. The code writes a payments row with failCode `NETWORK` plus a `console.error`, and the request throws.
+- (b) Toss approved, but saving the subscription failed. The code logs a `console.error` with the orderId, paymentKey, amount, and user, and writes no payments row.
 
-- **(a)** Toss approved, but its answer and the lookup both failed. The code writes a payments row with failCode `NETWORK` plus a `console.error`, and the request throws.
-- **(b)** Toss approved, but saving the subscription failed. The code logs a `console.error` with the orderId, paymentKey, amount, and user, and writes no payments row.
+Either way no subscription is saved, so the user's retry gets a new `subscriptionId` (`randomUUID`) and a new `orderId` (`orderIdFor(subscriptionId, start, 0)`: for a first charge the period start is the time of the attempt, so even the same subscription would get a new `orderId`; the trailing attempt counter stays 0). Toss may charge again, and neither case raises an alert.
 
-Either way no subscription is saved, so the user's retry gets a new `subscriptionId` (`randomUUID`) and a new `orderId` (`orderIdFor(subscriptionId, start, 0)`: for a first charge the period start is the time of the attempt, so even the same subscription would get a new `orderId`; the trailing attempt counter stays 0). Toss may charge again. Neither case raises an alert.
-
-**Planned fix.**
+Planned fix:
 
 - A stable `orderId`, recorded before calling Toss, so a retry reuses it.
 - An operator alert for this case.
@@ -470,22 +462,21 @@ Either way no subscription is saved, so the user's retry gets a new `subscriptio
 
 ## How it was built
 
-- One person did the planning, server, web app, subscription billing, Telegram alerts, and deployment, with Claude Code. 128 of the 130 commits through 2026-10-12 carry a `Co-Authored-By: Claude` trailer, and one merged PR came from a `claude/` branch.
-- Claude Code speeds up implementation. Design, code review, operations, and incident response are the author's own work.
-- Both known limitations came out of a code review on 2026-10-13. Their fixes will be written by hand.
-- **Testing:** there are no automated tests yet. The verifications quoted in this write-up are manual runs recorded in commit messages. A concurrency test for the checkout claim joins the fix list, also written by hand.
+I did the planning, server, web app, subscription billing, Telegram alerts, and deployment alone, with Claude Code. 128 of the 130 commits through 2026-10-12 carry a `Co-Authored-By: Claude` trailer, and one merged PR came from a `claude/` branch. Claude Code speeds up implementation; design, code review, operations, and incident response are my own.
+
+There are no automated tests yet. The verifications quoted in this write-up are manual runs recorded in commit messages. A concurrency test for the checkout claim is on the same by-hand list as the two known limitations.
 
 ## Stack
 
-- **Language:** TypeScript
-- **Web:** Next.js 16 (React 19), Tailwind CSS 4, on Vercel
-- **Worker:** Node 22 on AWS EC2 t3.micro, bundled into one file with esbuild, run by systemd
-- **Database:** PostgreSQL on Supabase (transaction pooler), postgres.js driver, Drizzle ORM
-- **AI:** Claude API (Haiku 5.5 for disclosure summaries, Sonnet 5.5 for company introductions); TypeSafe Jev API for importance scoring
-- **Payments and messaging:** Toss Payments billing, Telegram Bot API
-- **Login:** Kakao, Google, and Naver, handled directly (Supabase Auth removed; see [Login without Supabase Auth](#login-without-supabase-auth))
-- **Data sources:** DART (RSS, Open API, web viewer), ECOS, FRED, EIA, KOSIS, Korea Customs Service, KRX
-- **Monitoring:** healthchecks.io, Telegram operator commands
+- Language: TypeScript
+- Web: Next.js 16 (React 19), Tailwind CSS 4, on Vercel
+- Worker: Node 22 on AWS EC2 t3.micro, bundled into one file with esbuild, run by systemd
+- Database: PostgreSQL on Supabase (transaction pooler), postgres.js driver, Drizzle ORM
+- AI: Claude API (Haiku 5.5 for disclosure summaries, Sonnet 5.5 for company introductions); TypeSafe Jev API for importance scoring
+- Payments and messaging: Toss Payments billing, Telegram Bot API
+- Login: Kakao, Google, and Naver, handled directly (Supabase Auth removed; see [Login without Supabase Auth](#login-without-supabase-auth))
+- Data sources: DART (RSS, Open API, web viewer), ECOS, FRED, EIA, KOSIS, Korea Customs Service, KRX
+- Monitoring: healthchecks.io, Telegram operator commands
 
 ## Links
 
