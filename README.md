@@ -55,7 +55,7 @@ Supabase Auth was removed on 2026-09-28. Its Kakao provider always requested the
 
 - It asks only for the nickname and profile image.
 - When login starts, a random state (`randomUUID`) and the return path go into a 10-minute cookie, and the callback rejects a mismatched state. Naver login works the same way.
-- Users are keyed by Kakao member number.
+- Users are keyed by their Kakao user ID (회원번호).
 - The login itself is a cookie signed with `AUTH_SECRET` (30 days, httpOnly, SameSite=Lax).
 
 ```ts
@@ -250,7 +250,7 @@ try {
 Summaries are for subscribers only, and their caps are in dollars:
 
 - $0.30 per subscriber per 24 hours, shown in the UI as about 15 short summaries (a long filing counts as several).
-- $5 per 24 hours across all subscribers. At that point summaries pause and the operator is alerted; admins can still generate. The total cap also guards against multi-account abuse or a bug that regenerates summaries in a loop.
+- $5 per 24 hours across all subscribers. At that point summaries pause and the operator is alerted; admins can still generate. The total cap also guards against one person signing up many times or a bug that regenerates summaries in a loop.
 
 A count would say little about cost. A short filing costs about $0.02 to summarize and a long one about $0.30 (a long annual report, 사업보고서, first 150k characters; compared on 2026-09-30), so one long filing costs as much as about 15 short ones. A summary is generated once and shared by all subscribers, so opening an existing summary isn't counted. The cost of each call is computed from that model's price.
 
@@ -357,7 +357,7 @@ setInterval(() => {
 
 ### A freeze, then transactions that always failed (postgres.js)
 
-On 2026-09-29 every page froze. With postgres.js's default pipelining, when more queries arrived than there were connections, postgres.js queued several on one connection. Through Supabase's transaction pooler that stalled, the stalled queries held every connection, and every page froze. Setting `max_pipeline: 0` (one query per connection at a time) ended the freeze.
+Every page of the site froze at one point. With postgres.js's default pipelining, when more queries arrived than there were connections, postgres.js queued several on one connection. Through Supabase's transaction pooler that stalled, the stalled queries held every connection. Setting `max_pipeline: 0` (one query per connection at a time) on 2026-09-29 ended the freeze.
 
 It also made every transaction fail with `UNSAFE_TRANSACTION`, which broke subscription start and renewal and the ownership, bond, and screener syncs. `sql.begin` only takes a connection that can accept more work, and with pipelining off, none ever can. The fix, the same day, kept `max_pipeline: 0` and added a `transaction()` helper that reserves one connection and runs BEGIN, COMMIT, and ROLLBACK on it.
 
