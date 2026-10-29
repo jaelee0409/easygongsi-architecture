@@ -6,16 +6,16 @@ The application code is in a private repository, and this repo is the write-up. 
 
 ## What it does
 
-- It covers about 1.19M disclosures filed since 2014 and the 2,652 companies listed on KOSPI and KOSDAQ, Korea's stock markets.
-- Each filing is classified by type, has its figures extracted (earnings, dividends, financing, ownership stakes), and gets an importance score from 1 to 10. Subscribers also get an AI summary (Claude).
-- Filings scoring 8 or higher are posted automatically to a public Telegram channel and sent to subscribers. The Telegram bot @EasyGongsiBot also sends watchlist alerts.
+- It covers about 1.19M filings since 2014 and the 2,652 companies listed on KOSPI and KOSDAQ, Korea's stock markets.
+- Each filing is sorted into one of 8 categories by keyword rules on its title and has its figures extracted (earnings, dividends, financing, ownership stakes). Most filings also get an importance score from 1 to 10; ownership reports and a few schedule notices are skipped. Subscribers also get an AI summary (Claude).
+- Filings scoring 8 or higher, with confidence 0.75 or higher, are posted automatically to a public Telegram channel and sent to subscribers. The Telegram bot @EasyGongsiBot also sends watchlist alerts.
 - A watchlist holds up to 20 stocks, with 1 free after login.
 - The subscription is monthly, billed through Toss Payments, a Korean payment gateway. The launch price of ₩14,900 a month stays fixed for early subscribers, and a mid-term cancellation is refunded minus a 10% penalty.
 - Other pages cover National Pension Service holdings (1,206 stocks from the year-end list, plus recent changes from large-shareholding reports), macro indicators from ECOS (Bank of Korea), FRED, EIA, KOSIS (Statistics Korea), and the Korea Customs Service, and KRX (Korea Exchange) daily prices since 2015.
 - A sitemap lists about 10,000 URLs, and page titles are built from the extracted figures.
 - There is also an admin-only 3D "research office" built with React Three Fiber. Its Kiwoom quotes (Kiwoom is a Korean brokerage) run only on the local machine.
 
-EasyGongsi started as [Jubabi](https://github.com/jaelee0409/jubabi), an Android app for real-time DART alerts (Aug 2025 – Sep 2026, stopped). In September 2026 the project moved to the web to avoid app-store review and in-app payment overhead. The first commit was on 2026-09-26, and on 2026-10-01 the project was renamed EasyGongsi and moved to www.easygongsi.com.
+EasyGongsi started as [Jubabi](https://github.com/jaelee0409/jubabi), an Android app for real-time DART alerts (built Aug – Sep 2025; retired Sep 2026). In September 2026 the project moved to the web because publishing the app on the Play Store, with its release testing, was too much work. The first commit was on 2026-09-26, and on 2026-10-01 the project was renamed EasyGongsi and moved to www.easygongsi.com.
 
 ## Architecture
 
@@ -108,7 +108,7 @@ Statements from periodic reports are checked before saving (assets = liabilities
 
 I noticed an implausible change in the product itself, +10.14 percentage points for the National Pension Service's stake in NC, and traced it from there. The stake had fallen below 10%, which ended its major-shareholder (주요주주) reporting, and then crossed 10% again (9.76% on Sep 17 → 10.14% on Oct 12). The fresh report listed the previous stake as 0, so the whole stake showed as the change.
 
-The change is now computed against the same filer's previous report on the same form, and a filing with no earlier report is labeled "first report" (처음 보고). The National Pension Service page also stopped mixing large-shareholding (대량보유) reports into the comparison, because they count differently (10.24% vs 10.14% at the same time). The same change now shows +0.38 percentage points, in the disclosure list and in Telegram alerts.
+The change is now computed against the same filer's previous report on the same form, and a filing with no earlier report is labeled "first report" (처음 보고). The National Pension Service page also stopped mixing large-shareholding (대량보유) reports into the comparison, because they count differently (10.24% vs 10.14% at the same time). The same change now shows +0.38 percentage points, in the filing list and in Telegram alerts.
 
 ```ts
 // src/server/services/ownership.ts (trimmed)
@@ -139,18 +139,20 @@ function fixFreshChange(r, prev) {
 
 ## Importance scoring and alerts
 
-Each filing gets a score from 1 to 10 from numeric rules plus four questions answered by the TypeSafe Jev API. The scale changed from 1–5 to 1–10 on 2026-10-11.
+Filings get a score from 1 to 10 from numeric rules plus questions answered by the TypeSafe Jev API; ownership reports and a few schedule notices aren't scored. The scale changed from 1–5 to 1–10 on 2026-10-11.
 
-TypeSafe Jev is TypeSafe AI's API (`POST api.typesafe.ai/v1/systemone`, model `jev-latest`, which was jev-1.13.0 in October 2026). One call answers several structured questions about a text: graded scores, yes/no probabilities, or choices. The questions are in English and the filing data is in Korean, and only the worker calls it. The four questions:
+TypeSafe Jev is TypeSafe AI's API (`POST api.typesafe.ai/v1/systemone`, model `jev-latest`, which was jev-1.13.0 in October 2026). One call answers several structured questions about a text: graded scores, yes/no probabilities, or choices. The questions are in English and the filing data is in Korean, and only the worker calls it. Four questions are asked about every scored filing:
 
 - `materiality`: a 10-level scale since rule version 11 (2026-10-11); 5 levels before.
 - `routine`: is this routine administration?
 - `existential`: is survival or control at stake (delisting, default, a change of largest shareholder)?
 - `follow_up`: is this a follow-up to something already announced? (since version 12)
 
+Two more are asked when they apply: `notable_counterparty` (is the named counterparty of a supply contract a large, widely known company?) and `correction_material` (does a correction change numbers, terms, or decisions?).
+
 The rules are versioned, with 12 versions by 2026-10-12, and a rescore script recomputes stored scores. TypeSafe Jev charges $0.042 per 1M input tokens and a filing takes about 600–800 tokens, which comes to about $0.025–0.034 per 1,000 filings in input tokens.
 
-Filings that score 8 or higher are posted automatically to the public Telegram channel and sent to subscribers; 6 or higher are listed as major disclosures (주요 공시) on the site. @EasyGongsiBot sends watchlist alerts, and subscriber alerts with an AI summary. Delivery is at-most-once today; see [Known limitations](#known-limitations).
+Filings that score 8 or higher, with confidence 0.75 or higher, are posted automatically to the public Telegram channel and sent to subscribers. The site's major disclosures box (주요 공시) shows the day's top five filings that score 6 or higher. @EasyGongsiBot sends watchlist alerts, and subscriber alerts with an AI summary. Delivery is at-most-once today; see [Known limitations](#known-limitations).
 
 ## Billing with Toss Payments
 
@@ -295,7 +297,7 @@ const derivable = (n: number) => {
 if (!sourceWon.some((s) => s > 0 && Math.abs(s - won) / s <= 0.1)) issues.push(`amount differs in size from the filing: "${m[0]}"`);
 ```
 
-In a 10-filing comparison on 2026-09-30, Haiku 4.5 got amount units wrong (10억, ₩1 billion, came out as "1조", ₩1 trillion) and misread terms, so summaries stayed on Sonnet 5.5. Disclosure summaries moved to Claude Haiku 5.5 (effort xhigh) on 2026-10-08; company introductions stay on Claude Sonnet 5.5. Importance questions run on TypeSafe Jev (cost under [Importance scoring and alerts](#importance-scoring-and-alerts)).
+In a 10-filing comparison on 2026-09-30, Haiku 4.5 got amount units wrong (10억, ₩1 billion, came out as "1조", ₩1 trillion) and misread terms, so summaries stayed on Sonnet 5.5. Filing summaries moved to Claude Haiku 5.5 (effort xhigh) on 2026-10-08; company introductions stay on Claude Sonnet 5.5. Importance questions run on TypeSafe Jev (cost under [Importance scoring and alerts](#importance-scoring-and-alerts)).
 
 ## Operations
 
@@ -404,7 +406,7 @@ Only the UI strings a page needs are sent to the browser, about 65 KB less per p
 
 | Decision | What it buys | What it costs |
 |---|---|---|
-| Web service instead of the Android app | No app-store review, no in-app payment overhead | Alerts moved from app push notifications to Telegram |
+| Web service instead of the Android app | No Play Store publishing and release testing | Alerts moved from app push notifications to Telegram |
 | One always-on worker on a t3.micro, next to Vercel | One place for 5-second polling, scheduled jobs, and alerts | Little memory: the screener had to move to batches, plus heap, swap, MemoryMax, and watchdog guards |
 | The database decides what is new (`INSERT … ON CONFLICT DO NOTHING RETURNING`) | A filing seen twice (RSS and the backfill, or after a restart) starts follow-up work and alerts at most once | Alerts fire after the commit with no delivery record, so a crash in between loses them |
 | Checkout claimed by one conditional UPDATE with a 5-minute lease | Two tabs at once → one charge, with one column on `users`; a request that dies stops blocking after 5 minutes | Covers concurrent starts only; a user's retry after certain failures can still charge twice |
@@ -472,7 +474,7 @@ There are no automated tests yet. The verifications quoted in this write-up are 
 - Web: Next.js 16 (React 19), Tailwind CSS 4, on Vercel
 - Worker: Node 22 on AWS EC2 t3.micro, bundled into one file with esbuild, run by systemd
 - Database: PostgreSQL on Supabase (transaction pooler), postgres.js driver, Drizzle ORM
-- AI: Claude API (Haiku 5.5 for disclosure summaries, Sonnet 5.5 for company introductions); TypeSafe Jev API for importance scoring
+- AI: Claude API (Haiku 5.5 for filing summaries, Sonnet 5.5 for company introductions); TypeSafe Jev API for importance scoring
 - Payments and messaging: Toss Payments billing, Telegram Bot API
 - Login: Kakao, Google, and Naver, handled directly (Supabase Auth removed; see [Login without Supabase Auth](#login-without-supabase-auth))
 - Data sources: DART (RSS, Open API, web viewer), ECOS, FRED, EIA, KOSIS, Korea Customs Service, KRX
